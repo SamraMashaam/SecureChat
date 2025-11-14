@@ -28,6 +28,42 @@ def start_client(host="127.0.0.1", port=9000):
 
     # Receive server hello
     srv_hello = parse_message(c.recv(8192).decode())
+    p = dh.P
+    g = dh.G
+
+    # Generate client exponent (a)
+    client_a = dh.gen_private()
+
+    # Compute A = g^a mod p
+    A = pow(g, client_a, p)
+
+    # Send DHClient message
+    dh_client = DHClient(
+        p=str(p),
+        g=str(g),
+        A=str(A)
+    )
+    c.sendall(dh_client.to_json().encode() + b"\n")
+    print("[*] Sent DH parameters to server")
+
+    # Receive DHServer reply
+    dh_srv_raw = c.recv(8192).decode()
+    dh_srv = parse_message(dh_srv_raw)
+
+    if dh_srv.type != "dh_server":
+        print("[!] Expected dh_server message")
+        c.close()
+        return
+
+    server_B = int(dh_srv.B)
+
+    # Compute shared secret
+    shared = pow(server_B, client_a, p)
+
+    # Derive AES session key
+    aes_key = dh.derive_key(shared)
+    print("[DEBUG] CLIENT AES key:", aes_key.hex())
+    print("[+] DH complete — AES session key established")
 
     ok, reason = pki.verify_certificate(
         SERVER_CERT,
@@ -41,17 +77,6 @@ def start_client(host="127.0.0.1", port=9000):
 
     print("[*] Server cert OK")
 
-    # DH exchange
-    a_priv = dh.generate_private_key()
-    a_pub = dh.generate_public_key(a_priv)
-
-    c.sendall(DHClient(g=dh.G, p=dh.P, A=a_pub).to_json().encode())
-
-    dh_reply = parse_message(c.recv(8192).decode())
-    shared = dh.compute_shared_secret(dh_reply.B, a_priv)
-    aes_key = dh.derive_aes_key(shared)
-
-    print("[*] AES key established")
 
     # Login
     email = input("Email: ")

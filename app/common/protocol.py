@@ -1,4 +1,4 @@
-# app/common/protocol.py
+
 from pydantic import BaseModel
 from typing import Optional, Literal
 import json
@@ -44,14 +44,14 @@ class LoginMessage(BaseMessage):
 
 # DH messages
 class DHClient(BaseMessage):
-    type: Literal["dh client"] = "dh client"
-    g: int
-    p: int
-    A: int
+    type: Literal["dh_client"] = "dh_client"
+    p: str   # because these may be large integers
+    g: str
+    A: str
 
 class DHServer(BaseMessage):
-    type: Literal["dh server"] = "dh server"
-    B: int
+    type: Literal["dh_server"] = "dh_server"
+    B: str
 
 
 # Data plane message
@@ -90,17 +90,21 @@ _MSG_TYPE_MAP = {
     "server hello": ServerHello,
     "register": RegisterMessage,
     "login": LoginMessage,
-    "dh client": DHClient,
-    "dh server": DHServer,
+    "dh_client": DHClient,
+    "dh_server": DHServer,
     "msg": Msg,
     "receipt": Receipt,
     "error": ErrorMessage,
 }
 
+
 def parse_message(raw_json: str) -> BaseMessage:
-    # Parse JSON string and return an instance of the appropriate message class
     payload = json.loads(raw_json)
-    cls = _MSG_TYPE_MAP.get(payload.get("type"))
+    msg_type = payload.get("type")
+
+    cls = _MSG_TYPE_MAP.get(msg_type)
     if cls is None:
+        # Fallback: unknown message type
         return BaseMessage.model_validate(payload)
+
     return cls.model_validate(payload)

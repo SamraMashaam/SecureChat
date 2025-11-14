@@ -54,13 +54,36 @@ def start_server(host="127.0.0.1", port=9000):
     dh_raw = conn.recv(8192).decode()
     dh_msg = parse_message(dh_raw)
 
-    B_priv = dh.generate_private_key()
-    B_pub = dh.generate_public_key(B_priv)
-    shared = dh.compute_shared_secret(dh_msg.A, B_priv)
-    aes_key = dh.derive_aes_key(shared)
+    if dh_msg.type != "dh_client":
+        print("[!] Expected dh_client message")
+        conn.close()
+        return
 
-    conn.sendall(DHServer(B=B_pub).to_json().encode())
-    print("[*] Shared AES key established")
+    print("[*] Received DH parameters from client")
+
+    # Convert received numbers
+    client_p = int(dh_msg.p)
+    client_g = int(dh_msg.g)
+    client_A = int(dh_msg.A)
+
+    # Generate server exponent (b)
+    server_b = dh.gen_private()
+
+    # Compute B = g^b mod p
+    server_B = pow(client_g, server_b, client_p)
+
+    # Compute shared secret Ks = A^b mod p
+    shared = pow(client_A, server_b, client_p)
+
+    # Derive AES key from shared secret
+    aes_key = dh.derive_key(shared) 
+    print("[DEBUG] Server AES key:", aes_key.hex())
+    print("[+] DH complete — AES session key established")
+
+    # Send DHServer message back
+    resp = DHServer(B=str(server_B))
+    conn.sendall(resp.to_json().encode() + b"\n")
+
 
     # Receive login
     login_raw = conn.recv(4096).decode()
