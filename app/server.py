@@ -96,31 +96,78 @@ def start_server(host="127.0.0.1", port=9000):
         return
 
     print("\n[+] Login OK")
+    server_priv = sign.load_private_key(SERVER_KEY)
+    server_seq = 1
+
 
     # Receive messages
+    last_seq = 0
+
     while True:
         raw = conn.recv(8192)
         if not raw:
             break
-        msg = parse_message(raw.decode())
+
+        try:
+            msg = parse_message(raw.decode())
+        except Exception:
+            print("\n[!] Invalid JSON received")
+            continue
 
         if msg.type != "msg":
             continue
 
-        # Extract client public key from client certificate
+        # Replay protection
+        if msg.seqno <= last_seq:
+            print("\n[!] Replay/out-of-order message")
+            continue
+        last_seq = msg.seqno
+
+        # Extract client pubkey
         client_cert = pki.load_cert(CLIENT_CERT)
         client_pub = client_cert.public_key()
 
-        sig_input = make_sig_input(msg.seqno, msg.ts, msg.ct_bytes())
+        # Rebuild signature input
+        ct_bytes = msg.ct_bytes()
+        sig_input = make_sig_input(msg.seqno, msg.ts, ct_bytes)
 
+        # Verify signature
         if not sign.rsa_verify(client_pub, sig_input, msg.sig_bytes()):
             print("\n[!] Signature invalid")
             continue
 
-        pt = aes.decrypt_ecb(aes_key, msg.ct_bytes()).decode()
-        print(f"[client:{msg.seqno}] {pt}")
+        # Decrypt
+        try:
+            pt = aes.decrypt_ecb(aes_key, ct_bytes).decode()
+        except Exception:
+            print("\n[!] AES decrypt failed")
+            continue
 
+        print(f"[client:{msg.seqno}] {pt}")
+        # Echo
+        reply_pt = f"Server ack: {pt}".encode()
+
+        reply_ct = aes.encrypt_ecb(aes_key, reply_pt)
+        reply_ts = now_ms()
+
+        reply_sig_input = make_sig_input(server_seq, reply_ts, reply_ct)
+        reply_sig = sign.rsa_sign(server_priv, reply_sig_input)
+
+        reply_msg = Msg(
+            seqno=server_seq,
+            ts=reply_ts,
+            ct=b64encode(reply_ct),
+            sig=b64encode(reply_sig)
+        )
+
+        conn.sendall(reply_msg.to_json().encode() + b"\n")
+        transcript.append(server_seq, reply_ts, reply_msg.ct, reply_msg.sig, "server fingerprint")
+
+        server_seq += 1
+
+        # Log transcript
         transcript.append(msg.seqno, msg.ts, msg.ct, msg.sig, "client fingerprint")
+
 
     # End receipt
     receipt = transcript.generate_receipt("server", SERVER_KEY, 1, 9999)

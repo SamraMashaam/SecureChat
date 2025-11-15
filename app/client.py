@@ -1,5 +1,6 @@
 # app/client.py
 import socket, os
+import threading
 from dotenv import load_dotenv
 from app.crypto import aes, dh, sign, pki
 from app.common.protocol import *
@@ -32,6 +33,37 @@ def send_encrypted(conn, plaintext: str, aes_key: bytes, rsa_key, seqno: int):
     )
 
     conn.sendall(msg.to_json().encode() + b"\n")
+
+def listen_for_server(conn, aes_key, server_pub, transcript):
+    while True:
+        try:
+            raw = conn.recv(8192)
+            if not raw:
+                break
+
+            msg = parse_message(raw.decode())
+
+            if msg.type != "msg":
+                continue
+
+            # Verify signature
+            sig_input = make_sig_input(msg.seqno, msg.ts, msg.ct_bytes())
+            if not sign.rsa_verify(server_pub, sig_input, msg.sig_bytes()):
+                print("\n[!] Invalid server signature")
+                continue
+
+            # Decrypt AES ciphertext
+            pt = aes.decrypt_ecb(aes_key, msg.ct_bytes()).decode()
+
+            print(f"\n[server:{msg.seqno}] {pt}")
+
+            transcript.append(
+                msg.seqno, msg.ts, msg.ct, msg.sig, "server fingerprint"
+            )
+
+        except Exception as e:
+            print("\n[!] Listener error:", e)
+            break
 
 
 def start_client(host="127.0.0.1", port=9000):
@@ -90,12 +122,21 @@ def start_client(host="127.0.0.1", port=9000):
         CA_CERT,
         expected_cn="securechat.server"
     )
+    server_cert = pki.load_cert(SERVER_CERT)
+    server_pub = server_cert.public_key()
 
     if not ok:
         print("\n[!] Server cert invalid:", reason)
         return
 
     print("\n[*] Server cert OK")
+    # Start listener thread
+    listener = threading.Thread(
+        target=listen_for_server,
+        args=(c, aes_key, server_pub, transcript),
+        daemon=True
+    )
+    listener.start()
 
 
     # Login
