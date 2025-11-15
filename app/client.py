@@ -1,7 +1,6 @@
 # app/client.py
 import socket, os
 from dotenv import load_dotenv
-
 from app.crypto import aes, dh, sign, pki
 from app.common.protocol import *
 from app.common.utils import now_ms, make_sig_input, b64encode
@@ -14,6 +13,27 @@ CLIENT_KEY  = os.getenv("CLIENT_KEY")
 CA_CERT     = os.getenv("CA_CERT")
 SERVER_CERT = os.getenv("SERVER_CERT")
 
+def send_encrypted(conn, plaintext: str, aes_key: bytes, rsa_key, seqno: int):
+    from app.crypto import aes, sign
+    from app.common.utils import now_ms, make_sig_input, b64encode
+
+    pt_bytes = plaintext.encode()
+    ct_bytes = aes.encrypt_ecb(aes_key, pt_bytes)
+    ts = now_ms()
+
+    sig_input = make_sig_input(seqno, ts, ct_bytes)
+    sig_bytes = sign.rsa_sign(rsa_key, sig_input)
+
+    msg = Msg(
+        seqno=seqno,
+        ts=ts,
+        ct=b64encode(ct_bytes),
+        sig=b64encode(sig_bytes)
+    )
+
+    conn.sendall(msg.to_json().encode() + b"\n")
+
+
 def start_client(host="127.0.0.1", port=9000):
     c = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     c.connect((host, port))
@@ -24,7 +44,7 @@ def start_client(host="127.0.0.1", port=9000):
         client_cert=open(CLIENT_CERT, "r").read(),
         nonce=b64encode(os.urandom(16))
     )
-    c.sendall(hello.to_json().encode())
+    c.sendall(hello.to_json().encode() + b"\n")
 
     # Receive server hello
     srv_hello = parse_message(c.recv(8192).decode())
@@ -44,14 +64,14 @@ def start_client(host="127.0.0.1", port=9000):
         A=str(A)
     )
     c.sendall(dh_client.to_json().encode() + b"\n")
-    print("[*] Sent DH parameters to server")
+    print("\n[*] Sent DH parameters to server")
 
     # Receive DHServer reply
     dh_srv_raw = c.recv(8192).decode()
     dh_srv = parse_message(dh_srv_raw)
 
     if dh_srv.type != "dh_server":
-        print("[!] Expected dh_server message")
+        print("\n[!] Expected dh_server message")
         c.close()
         return
 
@@ -62,8 +82,8 @@ def start_client(host="127.0.0.1", port=9000):
 
     # Derive AES session key
     aes_key = dh.derive_key(shared)
-    print("[DEBUG] CLIENT AES key:", aes_key.hex())
-    print("[+] DH complete — AES session key established")
+    print("\n[DEBUG] CLIENT AES key:", aes_key.hex())
+    print("\n[+] DH complete — AES session key established")
 
     ok, reason = pki.verify_certificate(
         SERVER_CERT,
@@ -72,45 +92,50 @@ def start_client(host="127.0.0.1", port=9000):
     )
 
     if not ok:
-        print("[!] Server cert invalid:", reason)
+        print("\n[!] Server cert invalid:", reason)
         return
 
-    print("[*] Server cert OK")
+    print("\n[*] Server cert OK")
 
 
     # Login
     email = input("Email: ")
     pwd = input("Password: ")
 
-    c.sendall(LoginMessage(email=email, pwd=pwd).to_json().encode())
+    c.sendall(LoginMessage(email=email, pwd=pwd).to_json().encode() + b"\n")
 
     # Send messages
+    print("\n[*] Secure chat started. Type messages and press Enter.")
     seq = 1
+
+    from cryptography.hazmat.primitives import serialization
+    client_priv = serialization.load_pem_private_key(
+        open(CLIENT_KEY, "rb").read(),
+        password=None
+    )
+
     while True:
         pt = input("> ")
-        if pt == "exit":
+        if pt.strip().lower() == "exit":
             break
 
+        # Send encrypted message using helper
+        send_encrypted(c, pt, aes_key, client_priv, seq)
+
+        # Log transcript entry
         ts = now_ms()
-        ct = aes.encrypt_ecb(aes_key, pt.encode())
-        sig_input = make_sig_input(seq, ts, ct)
+        ct_bytes = aes.encrypt_ecb(aes_key, pt.encode())
+        sig_input = make_sig_input(seq, ts, ct_bytes)
+        sig = sign.rsa_sign(client_priv, sig_input)
 
-        priv = sign.load_private_key(CLIENT_KEY)
-        sig = sign.rsa_sign(priv, sig_input)
+        transcript.append(seq, ts, b64encode(ct_bytes), b64encode(sig), "client fingerprint")
 
-        msg = Msg(
-            seqno=seq,
-            ts=ts,
-            ct=b64encode(ct),
-            sig=b64encode(sig)
-        )
-
-        c.sendall(msg.to_json().encode())
-        transcript.append(seq, ts, msg.ct, msg.sig, "server fingerprint")
         seq += 1
 
-    transcript.generate_receipt("client", CLIENT_KEY, 1, seq-1)
-    print("[✓] Receipt generated")
+    # End session
+    transcript.generate_receipt("client", CLIENT_KEY, 1, seq - 1)
+    print("\n[✓] Receipt generated")
+
 
 if __name__ == "__main__":
     start_client()

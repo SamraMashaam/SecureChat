@@ -1,23 +1,26 @@
 # app/crypto/aes.py
+
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
 
-BLOCK_SIZE = 128  # bits
-
-def pad(data: bytes) -> bytes:
-    padder = padding.PKCS7(BLOCK_SIZE).padder()
-    return padder.update(data) + padder.finalize()
+# PKCS#7 padding
+def pad(data: bytes, block_size: int = 16) -> bytes:
+    pad_len = block_size - (len(data) % block_size)
+    return data + bytes([pad_len]) * pad_len
 
 def unpad(padded: bytes) -> bytes:
-    unpadder = padding.PKCS7(BLOCK_SIZE).unpadder()
-    return unpadder.update(padded) + unpadder.finalize()
+    pad_len = padded[-1]
+    if pad_len < 1 or pad_len > 16:
+        raise ValueError("Invalid PKCS#7 padding")
+    return padded[:-pad_len]
 
 def encrypt_ecb(key: bytes, plaintext: bytes) -> bytes:
+    plaintext = pad(plaintext, 16)
     cipher = Cipher(algorithms.AES(key), modes.ECB())
     encryptor = cipher.encryptor()
-    return encryptor.update(pad(plaintext)) + encryptor.finalize()
+    return encryptor.update(plaintext) + encryptor.finalize()
 
 def decrypt_ecb(key: bytes, ciphertext: bytes) -> bytes:
     cipher = Cipher(algorithms.AES(key), modes.ECB())
     decryptor = cipher.decryptor()
-    return unpad(decryptor.update(ciphertext) + decryptor.finalize())
+    plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+    return unpad(plaintext)

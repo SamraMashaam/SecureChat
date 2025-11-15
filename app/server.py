@@ -20,16 +20,16 @@ def start_server(host="127.0.0.1", port=9000):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind((host, port))
     s.listen(1)
-    print(f"[O] Server listening on {host}:{port}")
+    print(f"\n[O] Server listening on {host}:{port}")
 
     conn, addr = s.accept()
-    print(f"[+] Connection from {addr}")
+    print(f"\n[+] Connection from {addr}")
     transcript = Transcript("server")
 
     # Receive hello
     hello_raw = conn.recv(8192).decode()
     hello = parse_message(hello_raw)
-    print("[*] Received Hello")
+    print("\n[*] Received Hello")
 
     # Verify client certificate
     ok, reason = pki.verify_certificate(
@@ -39,7 +39,7 @@ def start_server(host="127.0.0.1", port=9000):
     )
 
     if not ok:
-        print("[!] Client cert invalid:", reason)
+        print("\n[!] Client cert invalid:", reason)
         conn.close()
         return
 
@@ -55,11 +55,11 @@ def start_server(host="127.0.0.1", port=9000):
     dh_msg = parse_message(dh_raw)
 
     if dh_msg.type != "dh_client":
-        print("[!] Expected dh_client message")
+        print("\n[!] Expected dh_client message")
         conn.close()
         return
 
-    print("[*] Received DH parameters from client")
+    print("\n[*] Received DH parameters from client")
 
     # Convert received numbers
     client_p = int(dh_msg.p)
@@ -77,8 +77,8 @@ def start_server(host="127.0.0.1", port=9000):
 
     # Derive AES key from shared secret
     aes_key = dh.derive_key(shared) 
-    print("[DEBUG] Server AES key:", aes_key.hex())
-    print("[+] DH complete — AES session key established")
+    print("\n[DEBUG] Server AES key:", aes_key.hex())
+    print("\n[+] DH complete — AES session key established")
 
     # Send DHServer message back
     resp = DHServer(B=str(server_B))
@@ -95,7 +95,7 @@ def start_server(host="127.0.0.1", port=9000):
         conn.close()
         return
 
-    print("[+] Login OK")
+    print("\n[+] Login OK")
 
     # Receive messages
     while True:
@@ -114,7 +114,7 @@ def start_server(host="127.0.0.1", port=9000):
         sig_input = make_sig_input(msg.seqno, msg.ts, msg.ct_bytes())
 
         if not sign.rsa_verify(client_pub, sig_input, msg.sig_bytes()):
-            print("[!] Signature invalid")
+            print("\n[!] Signature invalid")
             continue
 
         pt = aes.decrypt_ecb(aes_key, msg.ct_bytes()).decode()
@@ -124,7 +124,7 @@ def start_server(host="127.0.0.1", port=9000):
 
     # End receipt
     receipt = transcript.generate_receipt("server", SERVER_KEY, 1, 9999)
-    print("[✓] Receipt generated")
+    print("\n[✓] Receipt generated")
 
 if __name__ == "__main__":
     start_server()
