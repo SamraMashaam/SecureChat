@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.log
+
+# Secrets & certs
+.env
+certs/*
+!certs/.keep
+transcripts/*
+!transcripts/.keep
+
+# OS
+.DS_Store
+Thumbs.db

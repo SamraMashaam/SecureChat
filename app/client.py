@@ -57,9 +57,10 @@ def listen_for_server(conn, aes_key, server_pub, transcript):
 
             print(f"\n[server:{msg.seqno}] {pt}")
 
-            transcript.append(
-                msg.seqno, msg.ts, msg.ct, msg.sig, "server fingerprint"
-            )
+            # inside the receive loop after verifying signature
+            fingerprint = make_sig_input(msg.seqno, msg.ts, msg.ct_bytes()).hex()
+            transcript.append(msg.seqno, msg.ts, msg.ct, msg.sig, fingerprint)
+
 
         except Exception as e:
             print("\n[!] Listener error:", e)
@@ -146,7 +147,7 @@ def start_client(host="127.0.0.1", port=9000):
     c.sendall(LoginMessage(email=email, pwd=pwd).to_json().encode() + b"\n")
 
     # Send messages
-    print("\n[*] Secure chat started. Type messages and press Enter.")
+    print("\n[*] Secure chat started. Type messages and press Enter.\n Type 'exit' to end")
     seq = 1
 
     from cryptography.hazmat.primitives import serialization
@@ -169,13 +170,15 @@ def start_client(host="127.0.0.1", port=9000):
         sig_input = make_sig_input(seq, ts, ct_bytes)
         sig = sign.rsa_sign(client_priv, sig_input)
 
-        transcript.append(seq, ts, b64encode(ct_bytes), b64encode(sig), "client fingerprint")
+        fingerprint = make_sig_input(seq, ts, ct_bytes).hex()
+        transcript.append(seq, ts, ct_bytes, sig, fingerprint)
+
 
         seq += 1
 
     # End session
     transcript.generate_receipt("client", CLIENT_KEY, 1, seq - 1)
-    print("\n[✓] Receipt generated")
+    print("\n[=] Receipt generated")
 
 
 if __name__ == "__main__":
