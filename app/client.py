@@ -171,8 +171,7 @@ def start_client(host="127.0.0.1", port=9000):
         sig = sign.rsa_sign(client_priv, sig_input)
 
         fingerprint = make_sig_input(seq, ts, ct_bytes).hex()
-        transcript.append(seq, ts, ct_bytes, sig, fingerprint)
-
+        transcript.append(seq, ts, b64encode(ct_bytes), b64encode(sig), fingerprint)
 
         seq += 1
 

@@ -2,11 +2,9 @@
 import os
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from cryptography.hazmat.primitives.asymmetric import padding
-
-
 
 load_dotenv()
 
@@ -30,8 +28,8 @@ def verify_certificate(cert_path: str, ca_cert_path: str, expected_cn: str):
 
 
         # 2) Check validity period
-        now = datetime.utcnow()
-        if now < cert.not_valid_before or now > cert.not_valid_after:
+        now = datetime.now(tz=timezone.utc)
+        if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
             return False, "Certificate expired or not yet valid."
 
         # 3) Check CN matches expected
